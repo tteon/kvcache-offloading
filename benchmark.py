@@ -69,15 +69,6 @@ async def run_request(client, prompt, request_id, model, gen_len):
         "output_len": len(token_times)
     }
 
-async def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--warmup", action="store_true", help="Run warmup requests")
-    parser.add_argument("--model", type=str, default=MODEL_NAME, help="Model name")
-    parser.add_argument("--prompt-len", type=int, default=PROMPT_LEN, help="Prompt length")
-    parser.add_argument("--gen-len", type=int, default=GEN_LEN, help="Generation length")
-    parser.add_argument("--num-requests", type=int, default=NUM_REQUESTS, help="Number of requests")
-    parser.add_argument("--api-base", type=str, default=API_BASE, help="API Base URL")
-    parser.add_argument("--device-name", type=str, default="Unknown", help="GPU Device Name")
 async def main(args):
     client = AsyncOpenAI(api_key=API_KEY, base_url=args.api_base)
     
@@ -102,9 +93,6 @@ async def main(args):
     tasks = []
     for i in range(args.num_requests):
         tasks.append(run_request(client, prompt, i, args.model, args.gen_len))
-        # Small delay to not flood immediately if we want to test sequential cache hits
-        # But for max throughput we might want parallel. 
-        # For KV offload test, sequential or slightly overlapped is good to ensure cache is populated.
         await asyncio.sleep(0.5) 
 
     results = await asyncio.gather(*tasks)
@@ -115,9 +103,8 @@ async def main(args):
         return
 
     # Save detailed results to CSV
-    # Filename format: metrics_<label>_<model>_<prompt>_<gen>.csv
     safe_model = args.model.replace('/', '_')
-    csv_filename = f"metrics_{args.label}_{safe_model}_{args.prompt_len}_{args.gen_len}.csv"
+    csv_filename = os.path.join(args.output_dir, f"metrics_{args.label}_{safe_model}_{args.prompt_len}_{args.gen_len}.csv")
     with open(csv_filename, "w") as f:
         f.write("request_id,label,prompt_len,gen_len,total_len,ttft,e2e,avg_itl\n")
         for r in results:
@@ -136,4 +123,17 @@ async def main(args):
     print("---------------")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--warmup", action="store_true", help="Run warmup requests")
+    parser.add_argument("--model", type=str, default=MODEL_NAME, help="Model name")
+    parser.add_argument("--prompt-len", type=int, default=PROMPT_LEN, help="Prompt length")
+    parser.add_argument("--gen-len", type=int, default=GEN_LEN, help="Generation length")
+    parser.add_argument("--num-requests", type=int, default=NUM_REQUESTS, help="Number of requests")
+    parser.add_argument("--api-base", type=str, default=API_BASE, help="API Base URL")
+    parser.add_argument("--device-name", type=str, default="Unknown", help="Name of the GPU/Device")
+    parser.add_argument("--cache-dtype", type=str, default="auto", help="KV Cache Data Type")
+    parser.add_argument("--label", type=str, default="experiment", help="Label for the experiment")
+    parser.add_argument("--output-dir", type=str, default=".", help="Directory to save results")
+    args = parser.parse_args()
+
+    asyncio.run(main(args))

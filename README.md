@@ -115,24 +115,34 @@ This will output:
     ```bash
     ./run_experiments.sh --tier baseline --profile
     ```
-    The output file (`*.nsys-rep`) will be saved in the `profiles/` directory. You can open this file with the Nsight Systems GUI to visualize GPU kernel execution and memory transfers.
+    **Outputs**:
+    *   `profiles/*.nsys-rep`: Binary report. Open with Nsight Systems GUI.
+    *   `profiles/*_stats.txt`: **[NEW]** Auto-generated text summary of top kernels and GPU events. Check this for quick insights without the GUI.
 
-*   **GPU Utilization**: The script automatically captures `nvidia-smi dmon` output to `pcie_stats_*.csv`. Use this to correlate PCIe bandwidth spikes with cache transfer events.
-*   **Disk I/O**: For the `disk` tier, monitor `disk_io_stats_*.csv` to see the read/write throughput impact of LMCache.
+*   **GPU Utilization**: automatically captured in `pcie_stats_*.csv` via `nvidia-smi dmon`.
+*   **Disk I/O**: captured in `disk_io_stats_*.csv` (requires `dstat`).
 
-## ⚙️ Configuration
+## ⚙️ Customization & Advanced Configuration
 
-You can customize the vLLM engine parameters directly via CLI arguments:
+### 1. Hardware Adaptation
+*   **Memory Tuning**:
+    If you hit OOM (Out Of Memory) errors, reduce the GPU memory usage:
+    ```bash
+    ./run_experiments.sh --tier baseline --gpu-memory-utilization 0.85
+    ```
+*   **Multi-GPU (Tensor Parallelism)**:
+    For systems with multiple GPUs (e.g., A100 x2, H100 x8), use `--tensor-parallel-size` (or `-tp`):
+    ```bash
+    ./run_experiments.sh --tier baseline --tensor-parallel-size 2
+    ```
 
-*   `--gpu-memory-utilization`: Fraction of GPU memory to use (default: 0.95).
-*   `--max-model-len`: Maximum context length for the model (default: 512).
-
-Example:
-```bash
-./run_experiments.sh --tier baseline --gpu-memory-utilization 0.9 --max-model-len 2048
-```
-
-Modify files in `configs/` to tune LMCache behavior:
-*   `chunk_size`: Controls the granularity of cache transfer (default: 256).
-*   `max_local_cache_size`: Limit for CPU/Disk usage.
-*   `remote_url`: For Redis/Network offloading.
+### 2. Software Tuning
+*   **Model Swapping**:
+    Change the target model (requires access token for gated models):
+    ```bash
+    ./run_experiments.sh --model "meta-llama/Llama-2-13b-hf" --tensor-parallel-size 2
+    ```
+*   **LMCache Configuration**:
+    Edit YAML files in `configs/` to add new backends or tune chunk sizes:
+    *   `chunk_size`: Larger chunks (e.g., 512) might improve disk I/O throughput but increase granularity penalty.
+    *   `backend`: Switch between `cpu`, `file`, or `redis` in the YAML directly.

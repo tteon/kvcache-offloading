@@ -28,6 +28,7 @@ start_container() {
     local config_file=$2
     local port=$3
     local extra_args=${4:-""}
+    local tp_size=${5:-1}
     
     echo "Starting vLLM container: $name on port $port"
     
@@ -41,7 +42,7 @@ start_container() {
         docker_args="$docker_args -v $(pwd)/profiles:/profiles --entrypoint nsys"
         
         # Reconstruct command for nsys
-        local cmd="profile --trace=cuda,nvtx,osrt,cudnn,cublas --sample=cpu --output=/profiles/${name}_${LABEL:-auto} --force-overwrite=true /opt/venv/bin/vllm serve $MODEL_NAME --gpu-memory-utilization $GPU_MEM_UTIL --max-model-len $MAX_MODEL_LEN --dtype half --enforce-eager --kv-cache-dtype $CACHE_DTYPE"
+        local cmd="profile --trace=cuda,nvtx,osrt,cudnn,cublas --sample=cpu --output=/profiles/${name}_${LABEL:-auto} --force-overwrite=true /opt/venv/bin/vllm serve $MODEL_NAME --gpu-memory-utilization $GPU_MEM_UTIL --max-model-len $MAX_MODEL_LEN --dtype half --enforce-eager --kv-cache-dtype $CACHE_DTYPE --tensor-parallel-size $tp_size"
         
         docker run $docker_args \
             -e LMCACHE_CONFIG_FILE="$config_file" \
@@ -54,13 +55,13 @@ start_container() {
             -e LMCACHE_CONFIG_FILE="$config_file" \
             $extra_args \
             "$IMAGE_NAME" \
-            --model "$MODEL_NAME" --gpu-memory-utilization "$GPU_MEM_UTIL" --max-model-len "$MAX_MODEL_LEN" --dtype half --enforce-eager --kv-cache-dtype "$CACHE_DTYPE"
+            --model "$MODEL_NAME" --gpu-memory-utilization "$GPU_MEM_UTIL" --max-model-len "$MAX_MODEL_LEN" --dtype half --enforce-eager --kv-cache-dtype "$CACHE_DTYPE" --tensor-parallel-size "$tp_size"
     fi
         
     echo "Waiting for vLLM to be ready..."
     # Simple health check loop
     for i in {1..150}; do
-        if curl -s "http://localhost:$port/health" | grep -q "ok"; then
+        if [ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$port/health)" == "200" ]; then
             echo "vLLM is ready!"
             return 0
         fi
@@ -69,6 +70,25 @@ start_container() {
     echo "vLLM failed to start."
     docker logs "$name"
     return 1
+}
+
+generate_profile_report() {
+    local name=$1
+    local label=${2:-auto}
+    # If label is auto, we might need to match wildcard or passed label. 
+    # For simplicity, we assume the caller passes the same label used in start_container
+    
+    local report_path="profiles/${name}_${label}.nsys-rep"
+    local output_path="profiles/${name}_${label}_stats.txt"
+    
+    if [ -f "$report_path" ]; then
+        echo "Generating text stats for $report_path..."
+        # Run nsys stats using the same container image to ensure compatibility
+        docker run --rm -v "$(pwd)/profiles:/profiles" --entrypoint nsys "$IMAGE_NAME" stats --report gputrace,kernsum,nvtxsum "/profiles/${name}_${label}.nsys-rep" > "$output_path"
+        echo "Stats saved to $output_path"
+    else
+        echo "Warning: Profile report not found at $report_path"
+    fi
 }
 
 start_metrics_collection() {
