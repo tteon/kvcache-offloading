@@ -1,0 +1,5 @@
+chunk_size: 256
+remote_url: "redis://redis:6379"
+remote_serde: "cachegen"
+local_device: "cpu"
+max_local_cache_size: 5
