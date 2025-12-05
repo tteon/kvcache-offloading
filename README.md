@@ -17,7 +17,9 @@ This repository contains a reproducible experiment lab designed to benchmark and
 ```
 .
 ├── benchmark.py            # Async OpenAI-compatible benchmark client
-├── run_experiments.sh      # Orchestration script (Docker + Monitoring)
+├── run_experiments.sh      # Orchestration script (Main entry point)
+├── scripts/                # Helper scripts
+│   └── utils.sh            # Common functions for container mgmt/monitoring
 ├── plot_results.py         # Analysis and plotting tool
 ├── configs/                # LMCache configurations
 │   ├── cpu_offload.yaml    # CPU RAM offloading config
@@ -102,6 +104,9 @@ python3 plot_results.py --input "results/archive/metrics_*.csv" --output-prefix 
 This will output:
 *   `comparison_ttft.png`: Time to First Token vs Sequence Length.
 *   `comparison_e2e.png`: End-to-End Latency vs Sequence Length.
+*   `comparison_pcie.png`: PCIe Bandwidth over Time (System Metric).
+*   `comparison_disk_io.png`: Disk Read/Write Throughput over Time (System Metric).
+*   `comparison_report.md`: Summary table of average latencies and peak resource usage.
 
 ## 🔍 Profiling Details
 
