@@ -154,6 +154,44 @@ def find_latest_file(pattern):
         return None
     return max(files, key=os.path.getctime)
 
+def derive_constants_from_results(baseline_dir, offload_dir):
+    """
+    Attempts to derive T and R from actual experiment results.
+    Returns a dictionary with derived constants.
+    """
+    constants = {}
+    
+    # 1. Get N, T_prefill, T_decode from Baseline
+    baseline_metrics = find_latest_file(os.path.join(baseline_dir, "metrics_*.csv"))
+    if not baseline_metrics:
+        # If no baseline stats found, return partial or empty
+        print(f"Warning: No metrics CSV found in {baseline_dir}")
+        return constants
+    
+    df_base = pd.read_csv(baseline_metrics)
+    
+    # Prefill Constants
+    N = df_base['prompt_len'].mean()
+    ttft_base = df_base['ttft'].mean() * 1e6 # s to us
+    T_prefill = ttft_base / N if N > 0 else 0
+    
+    # Decode Constants
+    # T_decode is roughly avg_itl
+    T_decode = df_base['avg_itl'].mean() * 1e6 # s to us
+    
+    constants['N'] = int(N)
+    constants['T_prefill'] = T_prefill
+    constants['T_decode'] = T_decode
+    
+    # 2. Estimate R from Offload PCIe Stats (if available)
+    # This is trickier. We need to look at disk_offload or cpu_offload stats.
+    pcie_stats = find_latest_file(os.path.join(offload_dir, "pcie_stats_*.csv"))
+    R_estimate = 50.0 # Default fallback (us)
+    
+    constants['R'] = R_estimate
+    
+    return constants
+
 def run_scenario(name, N_or_L, R, T, alpha, mode="prefill"):
     print(f"--- {name} [{mode.upper()}] ---")
     
@@ -185,13 +223,16 @@ if __name__ == "__main__":
     parser.add_argument("--T", type=float, help="Compute time per token (us)")
     parser.add_argument("--alpha", type=float, help="Cache hit ratio (0.0 - 1.0)")
     
+    parser.add_argument("--baseline-dir", type=str, help="Path to baseline experiment results dir (to auto-derive T)")
+    parser.add_argument("--offload-dir", type=str, help="Path to offload experiment results dir (to auto-derive R)")
+    
     args = parser.parse_args()
     
     # Handle alias
     val_N = args.N if args.N is not None else args.L
 
-    # Default examples if no args provided
-    if not val_N and not args.R:
+    # Default examples if no args provided and no derived source
+    if not val_N and not args.R and not args.baseline_dir:
         print(">>> RUNNING DEFAULT SCENARIOS <<<\n")
         
         # Prefill Examples
@@ -204,14 +245,39 @@ if __name__ == "__main__":
         run_scenario("Decode 3: NVMe Reality Check", 4000, 0.5, 200, 0.5, "decode")
 
     else:
-        if None in [val_N, args.R, args.T]:
-            print("Error: Must provide --N (or --L), --R, --T arguments.")
+        # Use provided or derived args
+        T = args.T
+        R = args.R
+        alpha = args.alpha if args.alpha is not None else 1.0 
+        
+        if args.baseline_dir:
+            try:
+                # Auto-derive defaults
+                constants = derive_constants_from_results(args.baseline_dir, args.offload_dir if args.offload_dir else ".")
+                
+                if val_N is None: val_N = constants.get('N')
+                if R is None: R = constants.get('R')
+                
+                # Pick T based on mode
+                if T is None:
+                    if args.mode == 'decode':
+                        T = constants.get('T_decode')
+                    else:
+                        T = constants.get('T_prefill')
+
+                print(f"[Auto-Derived] N={val_N}, T={T:.2f}us, R={R:.2f}us")
+
+            except Exception as e:
+                print(f"Error deriving constants: {e}")
+                # Don't exit, fall through in case user provided args
+        
+        # Check inputs
+        if None in [val_N, R, T]:
+            print("Error: Must provide --N (or --L), --R, --T arguments or valid paths to results directories.")
             exit(1)
             
-        alpha = args.alpha if args.alpha is not None else 1.0
-        
         if args.mode in ["prefill", "both"]:
-            run_scenario("Custom Prefill Analysis", val_N, args.R, args.T, alpha, "prefill")
+            run_scenario("Custom Prefill Analysis", val_N, R, T, alpha, "prefill")
         
         if args.mode in ["decode", "both"]:
-            run_scenario("Custom Decode Analysis", val_N, args.R, args.T, alpha, "decode")
+            run_scenario("Custom Decode Analysis", val_N, R, T, alpha, "decode")

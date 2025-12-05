@@ -9,7 +9,11 @@ cache_store/
 *.csv
 *.png
 *.txt
+!requirements.txt
 *.log
+results/
+final_report*
+
 
 # IDE
 .vscode/

@@ -9,6 +9,7 @@ This repository contains a reproducible experiment lab designed to benchmark and
 *   **Detailed Profiling**:
     *   **Latency Metrics**: Time-to-First-Token (TTFT), Inter-Token Latency (ITL), End-to-End (E2E) Latency.
     *   **System Metrics**: GPU PCIe bandwidth monitoring, CPU/Disk I/O tracking.
+    *   **NVTX Annotation**: Automatic tagging of "Prefill" and "Decode" stages in Nsight timelines.
     *   **KV Cache Analysis**: Impact of offloading on memory efficiency and throughput.
 *   **Visualization**: Automated plotting tools to compare performance across tiers.
 
@@ -17,9 +18,7 @@ This repository contains a reproducible experiment lab designed to benchmark and
 ```
 .
 ├── benchmark.py            # Async OpenAI-compatible benchmark client
-├── run_experiments.sh      # Orchestration script (Main entry point)
-├── scripts/                # Helper scripts
-│   └── utils.sh            # Common functions for container mgmt/monitoring
+├── run_experiments.sh      # Orchestration script (Docker + Monitoring)
 ├── plot_results.py         # Analysis and plotting tool
 ├── configs/                # LMCache configurations
 │   ├── cpu_offload.yaml    # CPU RAM offloading config
@@ -88,61 +87,24 @@ This lab allows you to simulate specific workloads to identify bottlenecks.
 
 ## 📈 Analyzing Results
 
-The lab generates results in the `results/` directory, organized by experiment label and timestamp (e.g., `results/baseline_20231027_120000/`).
-
-Each folder contains:
-*   `metrics_*.csv`: Per-request latency metrics.
-*   `pcie_stats_*.csv`: PCIe bandwidth logs.
-*   `system_stats_*.csv`: vLLM internal metrics.
-*   `benchmark_*.log`: Benchmark console output.
+The lab generates CSV files (`metrics_*.csv`) containing per-request performance data.
 
 **Generate Comparative Plots**:
-You can point the plotting script to a specific results directory or use a wildcard:
 ```bash
-python3 plot_results.py --input "results/archive/metrics_*.csv" --output-prefix "comparison"
+python3 plot_results.py --input "metrics_*.csv" --output-prefix "comparison"
 ```
 This will output:
 *   `comparison_ttft.png`: Time to First Token vs Sequence Length.
 *   `comparison_e2e.png`: End-to-End Latency vs Sequence Length.
-*   `comparison_pcie.png`: PCIe Bandwidth over Time (System Metric).
-*   `comparison_disk_io.png`: Disk Read/Write Throughput over Time (System Metric).
-*   `comparison_report.md`: Summary table of average latencies and peak resource usage.
 
 ## 🔍 Profiling Details
 
-*   **Nsight Systems**:
-    To capture a GPU profile (CUDA traces, NVTX, OS runtime), add the `--profile` flag:
-    ```bash
-    ./run_experiments.sh --tier baseline --profile
-    ```
-    **Outputs**:
-    *   `profiles/*.nsys-rep`: Binary report. Open with Nsight Systems GUI.
-    *   `profiles/*_stats.txt`: **[NEW]** Auto-generated text summary of top kernels and GPU events. Check this for quick insights without the GUI.
+*   **GPU Utilization**: The script automatically captures `nvidia-smi dmon` output to `pcie_stats_*.csv`. Use this to correlate PCIe bandwidth spikes with cache transfer events.
+*   **Disk I/O**: For the `disk` tier, monitor `disk_io_stats_*.csv` to see the read/write throughput impact of LMCache.
 
-*   **GPU Utilization**: automatically captured in `pcie_stats_*.csv` via `nvidia-smi dmon`.
-*   **Disk I/O**: captured in `disk_io_stats_*.csv` (requires `dstat`).
+## ⚙️ Configuration
 
-## ⚙️ Customization & Advanced Configuration
-
-### 1. Hardware Adaptation
-*   **Memory Tuning**:
-    If you hit OOM (Out Of Memory) errors, reduce the GPU memory usage:
-    ```bash
-    ./run_experiments.sh --tier baseline --gpu-memory-utilization 0.85
-    ```
-*   **Multi-GPU (Tensor Parallelism)**:
-    For systems with multiple GPUs (e.g., A100 x2, H100 x8), use `--tensor-parallel-size` (or `-tp`):
-    ```bash
-    ./run_experiments.sh --tier baseline --tensor-parallel-size 2
-    ```
-
-### 2. Software Tuning
-*   **Model Swapping**:
-    Change the target model (requires access token for gated models):
-    ```bash
-    ./run_experiments.sh --model "meta-llama/Llama-2-13b-hf" --tensor-parallel-size 2
-    ```
-*   **LMCache Configuration**:
-    Edit YAML files in `configs/` to add new backends or tune chunk sizes:
-    *   `chunk_size`: Larger chunks (e.g., 512) might improve disk I/O throughput but increase granularity penalty.
-    *   `backend`: Switch between `cpu`, `file`, or `redis` in the YAML directly.
+Modify files in `configs/` to tune LMCache behavior:
+*   `chunk_size`: Controls the granularity of cache transfer (default: 256).
+*   `max_local_cache_size`: Limit for CPU/Disk usage.
+*   `remote_url`: For Redis/Network offloading.

@@ -42,7 +42,10 @@ start_container() {
         docker_args="$docker_args -v $(pwd)/profiles:/profiles --entrypoint nsys"
         
         # Reconstruct command for nsys
-        local cmd="profile --trace=cuda,nvtx,osrt,cudnn,cublas --sample=cpu --output=/profiles/${name}_${LABEL:-auto} --force-overwrite=true /opt/venv/bin/vllm serve $MODEL_NAME --gpu-memory-utilization $GPU_MEM_UTIL --max-model-len $MAX_MODEL_LEN --dtype half --enforce-eager --kv-cache-dtype $CACHE_DTYPE --tensor-parallel-size $tp_size"
+        # Add duration to ensure clean exit even if docker stop is called later, 
+        # or better yet, let it run for fixed time.
+        local duration=${PROFILE_DURATION:-60}
+        local cmd="profile --duration=$duration --trace=cuda,nvtx,osrt,cudnn,cublas --sample=cpu --output=/profiles/${name}_${LABEL:-auto} --force-overwrite=true /opt/venv/bin/vllm serve $MODEL_NAME --gpu-memory-utilization $GPU_MEM_UTIL --max-model-len $MAX_MODEL_LEN --dtype half --enforce-eager --kv-cache-dtype $CACHE_DTYPE --tensor-parallel-size $tp_size"
         
         docker run $docker_args \
             -e LMCACHE_CONFIG_FILE="$config_file" \
@@ -84,8 +87,18 @@ generate_profile_report() {
     if [ -f "$report_path" ]; then
         echo "Generating text stats for $report_path..."
         # Run nsys stats using the same container image to ensure compatibility
-        docker run --rm -v "$(pwd)/profiles:/profiles" --entrypoint nsys "$IMAGE_NAME" stats --report gputrace,kernsum,nvtxsum "/profiles/${name}_${label}.nsys-rep" > "$output_path"
-        echo "Stats saved to $output_path"
+        # We disable set -e temporarily because nsys stats might fail on some vGPUs
+        set +e
+        docker run --rm -v "$(pwd)/profiles:/profiles" --entrypoint nsys "$IMAGE_NAME" stats --report gputrace,kernsum,nvtxsum "/profiles/${name}_${label}.nsys-rep" > "$output_path" 2>&1
+        local exit_code=$?
+        set -e
+        
+        if [ $exit_code -ne 0 ]; then
+            echo "Warning: Failed to generate text stats (nsys stats returned $exit_code). This is common on vGPUs."
+            # Don't delete the rep file, user might want to debug it
+        else
+            echo "Stats saved to $output_path"
+        fi
     else
         echo "Warning: Profile report not found at $report_path"
     fi
