@@ -13,6 +13,8 @@ cache_store/
 *.log
 results/
 final_report*
+!serving/serving_logs/*.csv
+!serving/serving_logs/*.log
 
 
 # IDE
