@@ -3,3 +3,5 @@ numpy
 pandas
 matplotlib
 torch
+python-dotenv
+
